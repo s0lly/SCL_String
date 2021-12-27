@@ -9,10 +9,10 @@ The purpose of this header-only file is to simplify the C programmer's life in t
 
 This includes the following:
 
-- A wrapper around the null-terminated C string into a relatively simple struct with associated functions that manage
+ - A wrapper around the null-terminated C string into a relatively simple struct with associated functions that manage
 the size and allocation of memory.
 
-- The C-style null-terminator is maintained for easy use in functions such as printf and co. 
+ - The C-style null-terminator is maintained for easy use in functions such as printf and co. 
 But the user doesn't need to concern themselves with the requirement for the null-terminator:
 it's all taken care of behind the scenes via the family of functions provided.
 No need to remember how the various stdlib functions treat the null terminator.
@@ -26,5 +26,5 @@ and expand and contract dynamically according to whatever the user throws at the
  - Additional functionality and clarity around file reading and conversion between strings and other base types,
 and additional structs to make working with strings and their conversions that much simpler.
 
-- There are only two allocation (calloc) points in the entire library.
+ - There are only two allocation (calloc) and deallocation (free) points in the entire library.
 These can therefore be modified more easily to the user's own allocation methods, if desired.
