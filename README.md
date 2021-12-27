@@ -1,17 +1,17 @@
 # SCL_String
 Public domain, header-only file to simplify the C programmer's life in their interaction with strings
 
+NOTE: This library is still under construction, and should only be used with caution.
+If you do use it and uncover any bugs or modifications that would be helpful, please contact s0lly via any of the following mediums:
+
 Discord Channel     : https://discord.gg/kvappxm
+
 YouTube             : https://www.youtube.com/c/s0lly
+
 Twitter             : https://twitter.com/s0lly
 
-NOTE: This library is still under construction, and should only be used with caution.
-If you do use it and uncover any bugs or modifications that would be helpful, please contact s0lly via any of the
-mediums listed above.
 
-The purpose of this header-only file is to simplify the C programmer's life in their interaction with strings.
-
-This includes the following:
+This library includes the following features:
 
  - A wrapper around the null-terminated C string into a relatively simple struct with associated functions that manage
 the size and allocation of memory.
