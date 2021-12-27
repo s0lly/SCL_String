@@ -5,7 +5,7 @@ NOTE: This library is still under construction, and should only be used with cau
 If you do use it and uncover any bugs or modifications that would be helpful, please contact s0lly via any of the
 mediums listed above.
 
-The purpose of this header-only file is to simplify the C programmerâ€™s life in their interaction with strings.
+The purpose of this header-only file is to simplify the C programmer's life in their interaction with strings.
 
 This includes the following:
 
