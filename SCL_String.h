@@ -2,7 +2,7 @@
 /*********************************************************************************************************
  
 File Name           : SCL_String.h
-Version             : v0.01
+Version             : v0.02
 Date Last Modified  : 27.12.2021
 Author              : s0lly
 License             : The Unlicense / Public Domain (see end of file for license description)
@@ -19,10 +19,10 @@ The purpose of this header-only file is to simplify the C programmerâ€™s li
 
 This includes the following:
 
- - A wrapper around the null-terminated C string into a relatively simple struct with associated functions that manage
+- A wrapper around the null-terminated C string into a relatively simple struct with associated functions that manage
 the size and allocation of memory.
 
- - The C-style null-terminator is maintained for easy use in functions such as printf and co. 
+- The C-style null-terminator is maintained for easy use in functions such as printf and co. 
 But the user doesnâ€™t need to concern themselves with the requirement for the null-terminator:
 itâ€™s all taken care of behind the scenes via the family of functions provided.
 No need to remember how the various stdlib functions treat the null terminator.
@@ -36,7 +36,7 @@ and expand and contract dynamically according to whatever the user throws at the
  - Additional functionality and clarity around file reading and conversion between strings and other base types,
 and additional structs to make working with strings and their conversions that much simpler.
 
- - There are only two allocation (calloc) and deallocation (free) points in the entire library.
+- There are only two allocation (calloc) and deallocation (free) points in the entire library.
 These can therefore be modified more easily to the user's own allocation methods, if desired.
 
 *********************************************************************************************************/
@@ -799,12 +799,30 @@ static void String_FindReplaceFrom_All(String *string, String *oldContents, Stri
 
 // NOTE(s0lly): StringList functions
 
+static String *StringList_Get(StringList *stringList, int64_t index)
+{
+    String *result = 0;
+    if (stringList && stringList->e && index >= 0 && index < stringList->count)
+    {
+        result = &stringList->e[index];
+    }
+    return result;
+}
+
 static void StringList_Destroy(StringList *stringList)
 {
     if (stringList)
     {
         if (stringList->e)
         {
+            for (int64_t stringIndex = 0; stringIndex < stringList->count; stringIndex++)
+            {
+                String *currentString = StringList_Get(stringList, stringIndex);
+                if (currentString && currentString->e)
+                {
+                    String_Destroy(currentString);
+                }
+            }
             free(stringList->e);
         }
         *stringList = (StringList) { 0 }; 
@@ -832,6 +850,14 @@ static void StringList_Resize(StringList *stringList, int64_t countMaxNew)
             StringList result = { 0 };
             result = StringList_From_CountMax(countMaxNew);
             memmove(result.e, stringList->e, stringList->count * sizeof(String));
+            for (int64_t stringIndex = 0; stringIndex < min(countMaxNew, stringList->count); stringIndex++)
+            {
+                String *currentString = StringList_Get(stringList, stringIndex);
+                if (currentString && currentString->e)
+                {
+                    memmove(result.e[stringIndex].e, currentString->e, currentString->count * sizeof(uint8_t));
+                }
+            }
             result.count = stringList->count;
             StringList_Destroy(stringList);
             *stringList = result;
@@ -845,16 +871,6 @@ static void StringList_Resize(StringList *stringList, int64_t countMaxNew)
     {
         StringList_Destroy(stringList);
     }
-}
-
-static String *StringList_Get(StringList *stringList, int64_t index)
-{
-    String *result = 0;
-    if (stringList && stringList->e && index >= 0 && index < stringList->count)
-    {
-        result = &stringList->e[index];
-    }
-    return result;
 }
 
 static void StringList_PushCopy(StringList *stringList, String *string)
