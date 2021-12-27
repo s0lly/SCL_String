@@ -50,6 +50,7 @@ int main(int argc, char *argv[])
     for (int32_t i = 0; i < fileStrings.count; i++)
     {
         String *currentString = StringList_Get(&fileStrings, i);
+        // view the contents of each string of the file here
     }
     
     String *currentString = StringList_Get(&fileStrings, 9);
