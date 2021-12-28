@@ -2,8 +2,8 @@
 /*********************************************************************************************************
  
 File Name           : SCL_String.h
-Version             : v0.02
-Date Last Modified  : 27.12.2021
+Version             : v0.03
+Date Last Modified  : 28.12.2021
 Author              : s0lly
 License             : The Unlicense / Public Domain (see end of file for license description)
 
@@ -17,7 +17,7 @@ mediums listed above.
 
 The purpose of this header-only file is to simplify the C programmerâ€™s life in their interaction with strings.
 
-This includes the following:
+This includes the following features:
 
 - A wrapper around the null-terminated C string into a relatively simple struct with associated functions that manage
 the size and allocation of memory.
@@ -39,6 +39,9 @@ and additional structs to make working with strings and their conversions that m
 - There are only two allocation (calloc) and deallocation (free) points in the entire library.
 These can therefore be modified more easily to the user's own allocation methods, if desired.
 
+- This code runs without error messages when compiling via msvc with /Wall expect for those within <stdio.h>,
+and error 4820 (struct padding) which I accept as a necessary fact of life.
+
 *********************************************************************************************************/
 
 // NOTE(s0lly): Careful on ftell with large files due to return type
@@ -47,18 +50,20 @@ These can therefore be modified more easily to the user's own allocation methods
 // TODO(s0lly): Ensure that whenever count reduces, "freed" space is cleared to 0 to ensure cstring code works
 // TODO(s0lly): Rethink error code naming scheme
 // TODO(s0lly): Add delimiter parsing code in StringList_From_String_SplitByDelimiters function
+// TODO(s0lly): Sift through all integer conversions to ensure correct, limit to int32?
 
 
 #pragma once
 
-
 // NOTE(s0lly): External dependencies
 
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <ctype.h>
 
 
 // NOTE(s0lly): Defines
@@ -95,21 +100,21 @@ typedef struct String
 typedef struct File
 {
     FILE *handle;
-    int64_t cursor;
+    int32_t cursor;
     
 } File;
 
 typedef struct int64_tWithStringErrorCode
 {
-    int64_t val;
     SSL_STRING_CODE errorCode;
+    int64_t val;
     
 } int64_tWithStringErrorCode;
 
 typedef struct doubleWithStringErrorCode
 {
-    double val;
     SSL_STRING_CODE errorCode;
+    double val;
     
 } doubleWithStringErrorCode;
 
@@ -187,12 +192,12 @@ static String String_From_CountMax(int64_t countMax)
     return result;
 }
 
-static String String_From_CStr(uint8_t *cStr)
+static String String_From_CStr(const char *cStr)
 {
     String result = { 0 };
     if (cStr)
     {
-        int64_t newCountMax = strlen(cStr);
+        int64_t newCountMax = strlen((const char *)cStr);
         result = String_From_CountMax(newCountMax);;
         memmove(result.e, cStr, newCountMax);
         result.count = newCountMax;
@@ -245,10 +250,10 @@ static String String_From_int64_t(int64_t val)
 {
     String result = { 0 };
     uint8_t tempIntValString[32];
-    int32_t tempCheck = sprintf_s(tempIntValString, 32, "%I64d", val);
+    int32_t tempCheck = sprintf((char *)tempIntValString, "%lld", val);
     if (tempCheck != -1)
     {
-        result = String_From_CStr(tempIntValString);
+        result = String_From_CStr((const char *)tempIntValString);
     }
     return result;
 }
@@ -257,10 +262,10 @@ static String String_From_double(double val)
 {
     String result = { 0 };
     uint8_t tempIntValString[32];
-    int32_t tempCheck = sprintf_s(tempIntValString, 32, "%.16f", val);
+    int32_t tempCheck = sprintf((char *)tempIntValString, "%.16f", val);
     if (tempCheck != -1)
     {
-        result = String_From_CStr(tempIntValString);
+        result = String_From_CStr((const char *)tempIntValString);
     }
     return result;
 }
@@ -274,11 +279,11 @@ static String String_From_FileNextLine(File *file)
         int64_t newSize = 256;
         result = String_From_CountMax(newSize);
         
-        int64_t startCursor = file->cursor;
+        int32_t startCursor = file->cursor;
         int32_t fseekCheck = fseek(file->handle, startCursor, SEEK_SET);
         
-        uint8_t *fileScanResult = fgets(result.e, result.countMax, file->handle);
-        result.count = strlen(result.e);
+        uint8_t *fileScanResult = (uint8_t *)fgets((char *)result.e, (uint32_t)result.countMax, file->handle);
+        result.count = strlen((const char *)result.e);
         if (fileScanResult == 0)
         {
             String_Destroy(&result);
@@ -286,28 +291,28 @@ static String String_From_FileNextLine(File *file)
         }
         assert(fileScanResult);
         
-        int64_t endCursor = file->cursor + result.count;
-        int64_t cursorDiff = endCursor - startCursor;
+        int32_t endCursor = file->cursor + (int32_t)result.count;
+        int32_t cursorDiff = endCursor - startCursor;
         fseekCheck = fseek(file->handle, endCursor - 1, SEEK_SET);
         int32_t isLineEnd = (int32_t)fgetc(file->handle);
         int32_t isEOF = (int32_t)fgetc(file->handle);
         while(!(isLineEnd == '\n') && !(isEOF == '\0' || isEOF == EOF))
         {
-            int32_t fseekCheck = fseek(file->handle, startCursor, SEEK_SET);
+            fseekCheck = fseek(file->handle, startCursor, SEEK_SET);
             newSize = result.countMax * 2;
             String_Destroy(&result);
             result = String_From_CountMax(newSize);
-            fileScanResult = fgets(result.e, result.countMax, file->handle);
-            result.count = strlen(result.e);
+            fileScanResult = (uint8_t *)fgets((char *)result.e, (int32_t)result.countMax, file->handle);
+            result.count = strlen((const char *)result.e);
             assert(fileScanResult);
-            endCursor = file->cursor + result.count;
+            endCursor = file->cursor + (int32_t)result.count;
             cursorDiff = endCursor - startCursor;
             fseekCheck = fseek(file->handle, endCursor - 1, SEEK_SET);
             isLineEnd = (int32_t)fgetc(file->handle);
             isEOF = (int32_t)fgetc(file->handle);
         }
         
-        file->cursor += result.count;
+        file->cursor += (int32_t)result.count;
         
         if(*(String_Get_Last(&result)) == '\n')
         {
@@ -333,7 +338,7 @@ static void String_Reinit_CStr(String *string, uint8_t *cStr)
     String_Destroy(string);
     if (string)
     {
-        *string = String_From_CStr(cStr);
+        *string = String_From_CStr((const char *)cStr);
     }
 }
 
@@ -435,7 +440,7 @@ static void String_Insert_CStr(String *string, uint8_t *cStr, int64_t index)
 {
     if (cStr)
     {
-        String_Insert_Generic(string, cStr, index, strlen(cStr));
+        String_Insert_Generic(string, cStr, index, strlen((const char *)cStr));
     }
 }
 
@@ -467,7 +472,7 @@ static void String_Append_CStr(String *string, uint8_t *cStr)
 {
     if (cStr)
     {
-        String_Append_Generic(string, cStr, strlen(cStr));
+        String_Append_Generic(string, cStr, strlen((const char *)cStr));
     }
 }
 
@@ -487,14 +492,36 @@ static void String_Append_String(String *string, String *otherString)
     }
 }
 
+static SSL_STRING_CODE String_Compare(String *stringA, String *stringB)
+{
+    SSL_STRING_CODE result = SSL_STRING_CODE__COMPARE_ERROR;
+    if (stringA && stringA->e && stringB && stringB->e)
+    {
+        int32_t compVal = strcmp((const char *)stringA->e, (const char *)stringB->e);
+        if (compVal == 0)
+        {
+            result = SSL_STRING_CODE__COMPARE_EQUAL;
+        }
+        else if(compVal < 0)
+        {
+            result = SSL_STRING_CODE__COMPARE_LESS_THAN;
+        }
+        else
+        {
+            result = SSL_STRING_CODE__COMPARE_GREATER_THAN;
+        }
+    }
+    return result;
+}
+
 static int64_tWithStringErrorCode int64_t_From_String(String *string)
 {
     int64_tWithStringErrorCode result = { 0 };
     if (string && string->e)
     {
-        result.val = atoi(string->e);
+        result.val = atoi((const char *)string->e);
         String tempIntValString = String_From_CountMax(string->count);
-        sprintf_s(tempIntValString.e, tempIntValString.countMax + 1, "%I64d", result.val);
+        sprintf((char *)tempIntValString.e, "%lld", result.val);
         if (String_Compare(&tempIntValString, string) == SSL_STRING_CODE__COMPARE_EQUAL)
         {
             result.errorCode = SSL_STRING_CODE__NONE;
@@ -517,7 +544,7 @@ static doubleWithStringErrorCode double_From_String(String *string)
     doubleWithStringErrorCode result = { 0 };
     if (string && string->e)
     {
-        result.val = atof(string->e);
+        result.val = atof((const char *)string->e);
         
         int32_t encounteredDot = 0;
         int32_t countDots = 0;
@@ -580,28 +607,6 @@ static doubleWithStringErrorCode double_From_String(String *string)
     else
     {
         result.errorCode = SSL_STRING_CODE__NULL_STRING_OR_DATA_PASSED_TO_FUNCTION;
-    }
-    return result;
-}
-
-static SSL_STRING_CODE String_Compare(String *stringA, String *stringB)
-{
-    SSL_STRING_CODE result = SSL_STRING_CODE__COMPARE_ERROR;
-    if (stringA && stringA->e && stringB && stringB->e)
-    {
-        int32_t compVal = strcmp(stringA->e, stringB->e);
-        if (compVal == 0)
-        {
-            result = SSL_STRING_CODE__COMPARE_EQUAL;
-        }
-        else if(compVal < 0)
-        {
-            result = SSL_STRING_CODE__COMPARE_LESS_THAN;
-        }
-        else
-        {
-            result = SSL_STRING_CODE__COMPARE_GREATER_THAN;
-        }
     }
     return result;
 }
@@ -701,7 +706,7 @@ static void String_ToUpper(String *string)
         for (int64_t strIndex = 0; strIndex < string->count; strIndex++)
         {
             uint8_t *currentCh = String_Get(string, strIndex);
-            *currentCh = toupper(*currentCh);
+            *currentCh = (uint8_t)toupper(*currentCh);
         }
     }
 }
@@ -713,7 +718,7 @@ static void String_ToLower(String *string)
         for (int64_t strIndex = 0; strIndex < string->count; strIndex++)
         {
             uint8_t *currentCh = String_Get(string, strIndex);
-            *currentCh = tolower(*currentCh);
+            *currentCh = (uint8_t)tolower(*currentCh);
         }
     }
 }
@@ -725,7 +730,7 @@ static int64_t String_Find_FirstFrom(String *within, String *toFind, int64_t ind
         toFind && toFind->e &&
         indexStart >= 0 && indexStart < within->count)
     {
-        uint8_t *foundPtr = strstr(within->e + indexStart, toFind->e);
+        uint8_t *foundPtr = (uint8_t *)strstr((char *)within->e + indexStart, (char *)toFind->e);
         if (foundPtr)
         {
             result = (int64_t)(foundPtr - within->e);
@@ -849,14 +854,9 @@ static void StringList_Resize(StringList *stringList, int64_t countMaxNew)
         {
             StringList result = { 0 };
             result = StringList_From_CountMax(countMaxNew);
-            memmove(result.e, stringList->e, stringList->count * sizeof(String));
             for (int64_t stringIndex = 0; stringIndex < min(countMaxNew, stringList->count); stringIndex++)
             {
-                String *currentString = StringList_Get(stringList, stringIndex);
-                if (currentString && currentString->e)
-                {
-                    memmove(result.e[stringIndex].e, currentString->e, currentString->count * sizeof(uint8_t));
-                }
+                result.e[stringIndex] = String_From_String(StringList_Get(stringList, stringIndex));
             }
             result.count = stringList->count;
             StringList_Destroy(stringList);
@@ -923,10 +923,8 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                 }
             }
             
-            int64_t strLenCheck =  string->count;
-            
             // TODO(JS): Need to think through how to handle all ignorables
-            while(cursorIndex <= string->count + 1 && endCellIndex == -1 && !isEmptyCell)
+            while(cursorIndex <= string->count && endCellIndex == -1 && !isEmptyCell)
             {
                 uint8_t *currentChar = &string->e[cursorIndex]; 
                 
@@ -958,7 +956,7 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                 endCellIndex = string->countMax - 1;
             }
             
-            if (cursorIndex > strlen(string->e) && endCellIndex == -1)
+            if (cursorIndex > (int64_t)strlen((const char *)string->e) && endCellIndex == -1)
             {
                 String tempString = String_From_CStr("");
                 StringList_PushCopy(&result, &tempString);
@@ -974,8 +972,8 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                     endCellIndex--;
                 }
                 
-                int destIndex = 0;
-                int srcIndex = startCellIndex;
+                int64_t destIndex = 0;
+                int64_t srcIndex = startCellIndex;
                 
                 // TODO(JS): hits out of bounds on end of string - fix
                 uint8_t originalDelimited = string->e[endCellIndex + 1];
@@ -1011,9 +1009,7 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                     
                 }
                 
-                size_t segmentLen = strlen(segment);
-                
-                String tempString = String_From_CStr(segment);
+                String tempString = String_From_CStr((const char *)segment);
                 StringList_PushCopy(&result, &tempString);
                 String_Destroy(&tempString);
                 
@@ -1061,7 +1057,7 @@ static StringList StringList_From_Filename_String(String *filename)
     if (filename && filename->e)
     {
         File file = { 0 };
-        fopen_s(&file.handle, filename->e, "rb");
+        file.handle = fopen((const char *)filename->e, "rb");
         if (file.handle)
         {
             result = StringList_From_File(&file);
@@ -1073,7 +1069,7 @@ static StringList StringList_From_Filename_String(String *filename)
     return result;
 }
 
-static StringList StringList_From_Filename_CStr(uint8_t *cStr)
+static StringList StringList_From_Filename_CStr(const char *cStr)
 {
     StringList result = { 0 };
     
@@ -1091,7 +1087,7 @@ static StringList StringList_From_Filename_CStr(uint8_t *cStr)
 // NOTE(s0lly): Undefines
 
 #undef Mem_ClearBytes
-
+#undef _CRT_SECURE_NO_WARNINGS
 
 
 // NOTE(s0lly): License information
