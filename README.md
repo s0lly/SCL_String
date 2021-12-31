@@ -33,6 +33,9 @@ and additional structs to make working with strings and their conversions that m
  - There are only two allocation (calloc) and deallocation (free) points in the entire library.
 These can therefore be modified more easily to the user's own allocation methods, if desired.
 
+- This code runs without error messages when compiling via msvc with /Wall expect for those within <stdio.h>,
+and error 4201 (nameless struct) & error 4820 (struct padding) which I accept as a necessary fact of life.
+
 
 
 Example usage code, reading in the entire contents of the SCL_String.h file, converting it to an easy-to-use list of strings (for each line of the file), and separating out the 10th line of the file into component parts.
@@ -42,7 +45,7 @@ Only the 10th line is displayed on the console, including its component parts:
 ```
 #include "SCL_String.h"
 
-int main(int argc, char *argv[])
+int main(void)
 {
     StringList fileStrings = { 0 };
     fileStrings = StringList_From_Filename_CStr("SCL_String.h");
@@ -50,14 +53,15 @@ int main(int argc, char *argv[])
     for (int32_t i = 0; i < fileStrings.count; i++)
     {
         String *currentString = StringList_Get(&fileStrings, i);
-        // view the contents of each string of the file here
+        // use each string from the file here...
     }
     
     String *currentString = StringList_Get(&fileStrings, 9);
     printf("%s\n", currentString->e);
     
-    String delimiters = String_From_CStr(":/. ");
-    String ignoreChs = String_From_CStr("");
+    // This code doesn't bother to look at the StringMessage structs for error checking
+    String delimiters = String_From_CStr(":/. ").string;
+    String ignoreChs = String_From_CStr("\"").string;
     
     StringList discordSplit = StringList_From_String_SplitByDelimiters(currentString, &delimiters, &ignoreChs);
     
@@ -65,10 +69,12 @@ int main(int argc, char *argv[])
     {
         String *currentString2 = StringList_Get(&discordSplit, i);
         printf("%s\n", currentString2->e);
+        
     }
-       
+    
     String_Destroy(&delimiters);
     String_Destroy(&ignoreChs);
+    
     StringList_Destroy(&fileStrings);
     StringList_Destroy(&discordSplit);
     
