@@ -2,8 +2,8 @@
 /*********************************************************************************************************
  
 File Name           : SCL_String.h
-Version             : v0.03
-Date Last Modified  : 28.12.2021
+Version             : v0.04
+Date Last Modified  : 30.12.2021
 Author              : s0lly
 License             : The Unlicense / Public Domain (see end of file for license description)
 
@@ -40,7 +40,7 @@ and additional structs to make working with strings and their conversions that m
 These can therefore be modified more easily to the user's own allocation methods, if desired.
 
 - This code runs without error messages when compiling via msvc with /Wall expect for those within <stdio.h>,
-and error 4820 (struct padding) which I accept as a necessary fact of life.
+and error 4201 (nameless struct) & error 4820 (struct padding) which I accept as a necessary fact of life.
 
 *********************************************************************************************************/
 
@@ -48,8 +48,6 @@ and error 4820 (struct padding) which I accept as a necessary fact of life.
 // NOTE(s0lly): Using uint8_t as char representation - this may break code on certain platforms
 // NOTE(s0lly): Library assumes ASCII style strings only
 // TODO(s0lly): Ensure that whenever count reduces, "freed" space is cleared to 0 to ensure cstring code works
-// TODO(s0lly): Rethink error code naming scheme
-// TODO(s0lly): Add delimiter parsing code in StringList_From_String_SplitByDelimiters function
 // TODO(s0lly): Sift through all integer conversions to ensure correct, limit to int32?
 
 
@@ -68,23 +66,33 @@ and error 4820 (struct padding) which I accept as a necessary fact of life.
 
 // NOTE(s0lly): Defines
 
-#define Mem_ClearBytes(ptr, bytes) (memset((ptr), 0, (bytes)))
 
 
 // NOTE(s0lly): Enums
 
-typedef enum SSL_STRING_CODE
+typedef enum SCL_STRING_CODE
 {
-    SSL_STRING_CODE__NONE,
-    SSL_STRING_CODE__CANT_CONVERT_STRING_TO_int64_t,
-    SSL_STRING_CODE__CANT_CONVERT_STRING_TO_double,
-    SSL_STRING_CODE__NULL_STRING_OR_DATA_PASSED_TO_FUNCTION,
-    SSL_STRING_CODE__COMPARE_ERROR,
-    SSL_STRING_CODE__COMPARE_LESS_THAN,
-    SSL_STRING_CODE__COMPARE_EQUAL,
-    SSL_STRING_CODE__COMPARE_GREATER_THAN,
+    SCL_STRING_CODE__NO_MESSAGE,
+    SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_NULL_CHARACTER_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_INVALID_STRING_COUNT_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_NULL_FILE_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_NULL_FILE_HANDLE_PASSED_TO_FUNCTION,
+    SCL_STRING_CODE__ERROR_SPRINTF_CONVERTING_FROM_int64_t_TO_STRING,
+    SCL_STRING_CODE__ERROR_SPRINTF_CONVERTING_FROM_double_TO_STRING,
+    SCL_STRING_CODE__ERROR_CANT_CONVERT_STRING_TO_int64_t,
+    SCL_STRING_CODE__ERROR_CANT_CONVERT_STRING_TO_double,
+    SCL_STRING_CODE__ERROR_COMPARE_FAILURE,
+    SCL_STRING_CODE__ERROR_COUNTMAX,
+    SCL_STRING_CODE__FIND_NO_MATCH,
+    SCL_STRING_CODE__FILE_ENCOUNTERED_EOF,
+    SCL_STRING_CODE__COMPARE_LESS_THAN,
+    SCL_STRING_CODE__COMPARE_EQUAL,
+    SCL_STRING_CODE__COMPARE_GREATER_THAN,
     
-} SSL_STRING_CODE;
+} SCL_STRING_CODE;
 
 
 // NOTE(s0lly): Structs
@@ -97,27 +105,26 @@ typedef struct String
     
 } String;
 
+typedef struct StringMessage
+{
+    SCL_STRING_CODE code;
+    union
+    {
+        String string;
+        int64_t int64Val;
+        double doubleVal;
+        String *stringPtr;
+        uint8_t *chPtr;
+    };
+    
+} StringMessage;
+
 typedef struct File
 {
     FILE *handle;
     int32_t cursor;
     
 } File;
-
-typedef struct int64_tWithStringErrorCode
-{
-    SSL_STRING_CODE errorCode;
-    int64_t val;
-    
-} int64_tWithStringErrorCode;
-
-typedef struct doubleWithStringErrorCode
-{
-    SSL_STRING_CODE errorCode;
-    double val;
-    
-} doubleWithStringErrorCode;
-
 
 typedef struct StringList
 {
@@ -128,170 +135,280 @@ typedef struct StringList
 } StringList;
 
 
+// NOTE(s0lly): Helper functions
+
+static void Mem_ClearBytes(void *ptr, int64_t bytes)
+{
+    memset(ptr, 0, bytes);
+}
+
+
 // NOTE(s0lly): String functions
 
-static int64_t String_Get_Count(String *string)
+static StringMessage String_Get_Count(String *string)
 {
-    int64_t result = -1;
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = string->count;
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg.int64Val = string->count;
+    }
+    return msg;
 }
 
-static int64_t String_Get_CountMax(String *string)
+static StringMessage String_Get_CountMax(String *string)
 {
-    int64_t result = -1;
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = string->countMax;
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg.int64Val = string->countMax;
+    }
+    return msg;
 }
 
-static uint8_t *String_Get_First(String *string)
+static StringMessage String_Get_First(String *string)
 {
-    uint8_t *result = 0;
-    if (string && string->count > 0)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = &string->e[0];
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if(string->count == 0)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg.chPtr = &string->e[0];
+    }
+    return msg;
 }
 
-static uint8_t *String_Get_Last(String *string)
+static StringMessage String_Get_Last(String *string)
 {
-    uint8_t *result = 0;
-    if (string && string->count > 0)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = &string->e[string->count - 1];
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if(string->count == 0)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg.chPtr = &string->e[string->count - 1];
+    }
+    return msg;
 }
 
-static uint8_t *String_Get(String *string, int64_t index)
+static StringMessage String_Get(String *string, int64_t index)
 {
-    uint8_t *result = 0;
-    if (string && string->e &&
-        index >= 0 && index < string->count)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = &string->e[index];
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (index < 0 || index >= string->count)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg.chPtr = &string->e[index];
+    }
+    return msg;
 }
 
-static String String_From_CountMax(int64_t countMax)
+static StringMessage String_From_CountMax(int64_t countMax)
 {
-    String result = { 0 };
-    if (countMax >= 0)
+    StringMessage msg = { 0 };
+    if (countMax < 0)
     {
-        result.e = calloc(countMax + 1, sizeof(result.e[0]));
-        result.countMax = countMax;
+        msg.code = SCL_STRING_CODE__ERROR_INVALID_STRING_COUNT_PASSED_TO_FUNCTION;
     }
-    return result;
+    else
+    {
+        msg.string.e = calloc(countMax + 1, sizeof(msg.string.e[0]));
+        msg.string.countMax = countMax;
+    }
+    return msg;
 }
 
-static String String_From_CStr(const char *cStr)
+static StringMessage String_Internal_CopyStringIntoMessage(const void *src, int64_t newCount, int64_t newCountMax)
 {
-    String result = { 0 };
-    if (cStr)
+    StringMessage msg = String_From_CountMax(newCountMax);
+    if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
     {
-        int64_t newCountMax = strlen((const char *)cStr);
-        result = String_From_CountMax(newCountMax);;
-        memmove(result.e, cStr, newCountMax);
-        result.count = newCountMax;
+        memmove(msg.string.e, src, newCount);
+        msg.string.count = newCount;
     }
-    return result;
+    return msg;
 }
 
-static void String_Destroy(String *string)
+static StringMessage String_From_CStr(const char *cStr)
 {
-    if (string)
+    StringMessage msg = { 0 };
+    if (!cStr)
     {
-        if (string->e)
-        {
-            free(string->e);
-        }
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Internal_CopyStringIntoMessage((void *)cStr, strlen((const char *)cStr), strlen((const char *)cStr));
+    }
+    return msg;
+}
+
+static StringMessage String_Destroy(String *string)
+{
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        free(string->e);
         *string = (String) { 0 };
     }
+    return msg;
 }
 
-static String String_From_String(String *otherString)
+static StringMessage String_From_String(String *src)
 {
-    String result = { 0 };
-    if (otherString && otherString->e)
+    StringMessage msg = { 0 };
+    if (!src)
     {
-        int64_t newCountMax = otherString->count;
-        result = String_From_CountMax(newCountMax);
-        memmove(result.e, otherString->e, newCountMax);
-        result.count = newCountMax;
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
-}
-
-static String String_From_SubString(String *string, int64_t indexStartInclusive, int64_t indexEndInclusive)
-{
-    String result = { 0 };
-    if (string && string->e &&
-        indexStartInclusive >= 0 && indexStartInclusive < string->count &&
-        indexEndInclusive >= 0 && indexEndInclusive < string->count &&
-        indexStartInclusive <= indexEndInclusive)
+    else if(!src->e)
     {
-        int64_t newCountMax = indexEndInclusive - indexStartInclusive + 1;
-        result = String_From_CountMax(newCountMax);
-        memmove(result.e, string->e + indexStartInclusive, newCountMax);
-        result.count = newCountMax;
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
     }
-    return result;
-}
-
-static String String_From_int64_t(int64_t val)
-{
-    String result = { 0 };
-    uint8_t tempIntValString[32];
-    int32_t tempCheck = sprintf((char *)tempIntValString, "%lld", val);
-    if (tempCheck != -1)
+    else
     {
-        result = String_From_CStr((const char *)tempIntValString);
+        msg = String_Internal_CopyStringIntoMessage(src->e, src->count, src->count);
     }
-    return result;
+    return msg;
 }
 
-static String String_From_double(double val)
+static StringMessage String_From_SubString(String *string, int64_t indexStartInclusive, int64_t indexEndInclusive)
 {
-    String result = { 0 };
-    uint8_t tempIntValString[32];
-    int32_t tempCheck = sprintf((char *)tempIntValString, "%.16f", val);
-    if (tempCheck != -1)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = String_From_CStr((const char *)tempIntValString);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStartInclusive < 0 || indexStartInclusive >= string->count ||
+             indexEndInclusive < 0 || indexEndInclusive >= string->count ||
+             indexStartInclusive > indexEndInclusive)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else 
+    {
+        msg = String_Internal_CopyStringIntoMessage(string->e + indexStartInclusive,
+                                                    indexEndInclusive - indexStartInclusive + 1,
+                                                    indexEndInclusive - indexStartInclusive + 1);
+        
+    }
+    return msg;
 }
 
-static String String_From_FileNextLine(File *file)
+static StringMessage String_From_int64_t(int64_t val)
 {
-    String result = { 0 };
-    
-    if (file && file->handle)
+    StringMessage msg = { 0 };
+    uint8_t tempValString[32];
+    int32_t tempCheck = sprintf((char *)tempValString, "%lld", val);
+    if (tempCheck < 0)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_SPRINTF_CONVERTING_FROM_int64_t_TO_STRING;
+    }
+    else
+    {
+        msg = String_From_CStr((const char *)tempValString);
+    }
+    return msg;
+}
+
+static StringMessage String_From_double(double val)
+{
+    StringMessage msg = { 0 };
+    uint8_t tempValString[32];
+    int32_t tempCheck = sprintf((char *)tempValString, "%.16f", val);
+    if (tempCheck < 0)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_SPRINTF_CONVERTING_FROM_int64_t_TO_STRING;
+    }
+    else
+    {
+        msg = String_From_CStr((const char *)tempValString);
+    }
+    return msg;
+}
+
+// TODO(s0lly): Flatten code
+static StringMessage String_From_FileNextLine(File *file)
+{
+    StringMessage msg = { 0 };
+    if (!file)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_FILE_PASSED_TO_FUNCTION;
+    }
+    else if(!file->handle)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_FILE_HANDLE_PASSED_TO_FUNCTION;
+    }
+    else
     {
         int64_t newSize = 256;
-        result = String_From_CountMax(newSize);
+        msg = String_From_CountMax(newSize);
         
         int32_t startCursor = file->cursor;
         int32_t fseekCheck = fseek(file->handle, startCursor, SEEK_SET);
         
-        uint8_t *fileScanResult = (uint8_t *)fgets((char *)result.e, (uint32_t)result.countMax, file->handle);
-        result.count = strlen((const char *)result.e);
+        uint8_t *fileScanResult = (uint8_t *)fgets((char *)msg.string.e, (uint32_t)msg.string.countMax, file->handle);
+        msg.string.count = strlen((const char *)msg.string.e);
         if (fileScanResult == 0)
         {
-            String_Destroy(&result);
-            return result;
+            String_Destroy(&msg.string);
+            msg.code = SCL_STRING_CODE__FILE_ENCOUNTERED_EOF;
+            return msg;
         }
-        assert(fileScanResult);
         
-        int32_t endCursor = file->cursor + (int32_t)result.count;
+        int32_t endCursor = file->cursor + (int32_t)msg.string.count;
         int32_t cursorDiff = endCursor - startCursor;
         fseekCheck = fseek(file->handle, endCursor - 1, SEEK_SET);
         int32_t isLineEnd = (int32_t)fgetc(file->handle);
@@ -299,252 +416,381 @@ static String String_From_FileNextLine(File *file)
         while(!(isLineEnd == '\n') && !(isEOF == '\0' || isEOF == EOF))
         {
             fseekCheck = fseek(file->handle, startCursor, SEEK_SET);
-            newSize = result.countMax * 2;
-            String_Destroy(&result);
-            result = String_From_CountMax(newSize);
-            fileScanResult = (uint8_t *)fgets((char *)result.e, (int32_t)result.countMax, file->handle);
-            result.count = strlen((const char *)result.e);
-            assert(fileScanResult);
-            endCursor = file->cursor + (int32_t)result.count;
+            newSize = msg.string.countMax * 2;
+            String_Destroy(&msg.string);
+            msg = String_From_CountMax(newSize);
+            fileScanResult = (uint8_t *)fgets((char *)msg.string.e, (int32_t)msg.string.countMax, file->handle);
+            msg.string.count = strlen((const char *)msg.string.e);
+            endCursor = file->cursor + (int32_t)msg.string.count;
             cursorDiff = endCursor - startCursor;
             fseekCheck = fseek(file->handle, endCursor - 1, SEEK_SET);
             isLineEnd = (int32_t)fgetc(file->handle);
             isEOF = (int32_t)fgetc(file->handle);
         }
         
-        file->cursor += (int32_t)result.count;
+        file->cursor += (int32_t)msg.string.count;
         
-        if(*(String_Get_Last(&result)) == '\n')
+        if(*(String_Get_Last(&msg.string)).chPtr == '\n')
         {
-            *(String_Get_Last(&result)) = '\0';
-            result.count--;
+            *(String_Get_Last(&msg.string)).chPtr = '\0';
+            msg.string.count--;
         }
     }
     
-    return result;
+    return msg;
 }
 
-static void String_Reinit_CountMax(String *string, int64_t countMax)
+static void String_Internal_ExtractStringFromMessage(String *dst, StringMessage* msg)
 {
-    String_Destroy(string);
-    if (string)
+    *dst = msg->string;
+    msg->string = (String) { 0 };
+}
+
+static StringMessage String_Reinit_CountMax(String *string, int64_t countMax)
+{
+    StringMessage msg = String_Destroy(string);
+    if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
     {
-        *string = String_From_CountMax(countMax);
+        msg = String_From_CountMax(countMax);
+        if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
+        {
+            String_Internal_ExtractStringFromMessage(string, &msg);
+        }
     }
+    return msg;
 }
 
-static void String_Reinit_CStr(String *string, uint8_t *cStr)
+static StringMessage String_Reinit_CStr(String *string, uint8_t *cStr)
 {
-    String_Destroy(string);
-    if (string)
+    StringMessage msg = String_Destroy(string);
+    if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
     {
-        *string = String_From_CStr((const char *)cStr);
+        msg = String_From_CStr((const char *)cStr);
+        if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
+        {
+            String_Internal_ExtractStringFromMessage(string, &msg);
+        }
     }
+    return msg;
 }
 
-static void String_Reinit_String(String *string, String *otherString)
+static StringMessage String_Reinit_String(String *string, String *otherString)
 {
-    String_Destroy(string);
-    if (string)
+    StringMessage msg = String_Destroy(string);
+    if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
     {
-        *string = String_From_String(otherString);
+        msg = String_From_String(otherString);
+        if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
+        {
+            String_Internal_ExtractStringFromMessage(string, &msg);
+        }
     }
+    return msg;
 }
 
-static void String_Reinit_FileNextLine(String *string, File *file)
+static StringMessage String_Reinit_FileNextLine(String *string, File *file)
 {
-    String_Destroy(string);
-    if (string)
+    StringMessage msg = String_Destroy(string);
+    if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
     {
-        *string = String_From_FileNextLine(file);
+        msg = String_From_FileNextLine(file);
+        if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
+        {
+            String_Internal_ExtractStringFromMessage(string, &msg);
+        }
     }
+    return msg;
 }
 
-static void String_Clear(String *string)
+static StringMessage String_Clear(String *string)
 {
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         Mem_ClearBytes(string->e, string->countMax * sizeof(string->e[0]));
         string->count = 0;
     }
+    return msg;
 }
 
-static void String_Resize(String *string, int64_t newCountMax)
+static StringMessage String_Resize(String *string, int64_t newCountMax)
 {
-    if (newCountMax > 0)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        if (string && string->e)
-        {
-            if (newCountMax >= 0 && newCountMax < string->countMax)
-            {
-                string->countMax = newCountMax;
-                string->count = min(string->count, string->countMax);
-            }
-            else
-            {
-                String tempString = { 0 };
-                tempString = String_From_CountMax(newCountMax);
-                memmove(tempString.e, string->e, string->count);
-                tempString.count = string->count;
-                String_Destroy(string);
-                *string = tempString;
-            }
-        }
-        else
-        {
-            *string = String_From_CountMax(newCountMax);
-        }
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (newCountMax < 0)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_INVALID_STRING_COUNT_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg = String_Reinit_CountMax(string, newCountMax);
+    }
+    else if (newCountMax <= string->countMax)
+    {
+        string->countMax = newCountMax;
+        string->count = min(string->count, string->countMax);
+        string->e[string->count] = '\0';
     }
     else
     {
+        msg = String_Internal_CopyStringIntoMessage(string->e, string->count, newCountMax);
         String_Destroy(string);
+        String_Internal_ExtractStringFromMessage(string, &msg);
     }
+    return msg;
 }
 
-static int32_t String_IsEmpty(String *string)
+static StringMessage String_IsEmpty(String *string)
 {
-    int32_t result = -1;
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result = (int32_t)(string->count == 0);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-    return result;
-}
-
-static void String_Insert_Generic(String *string, uint8_t *otherData, int64_t index, int64_t otherCount)
-{
-    if (string && string->e && index >= 0 && index <= string->count && otherCount > 0)
+    else if (!string->e)
     {
-        String tempResult = { 0 };
-        int64_t newCountMax = string->count + otherCount;
-        if (newCountMax > string->countMax)
-        {
-            tempResult = String_From_CountMax(newCountMax);
-            memmove(tempResult.e, string->e, index);
-            memmove(tempResult.e + index, otherData, otherCount);
-            memmove(tempResult.e + index + otherCount, string->e + index, string->count - index);
-            tempResult.count = tempResult.countMax;
-            String_Destroy(string);
-            *string = tempResult;
-        }
-        else
-        {
-            memmove(string->e + index + otherCount, string->e + index, string->count - index);
-            memmove(string->e + index, otherData, otherCount);
-            string->count += otherCount;
-        }
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
     }
-}
-
-static void String_Insert_CStr(String *string, uint8_t *cStr, int64_t index)
-{
-    if (cStr)
+    else
     {
-        String_Insert_Generic(string, cStr, index, strlen((const char *)cStr));
+        msg.int64Val = (int64_t)(string->count == 0);
     }
+    return msg;
 }
 
-static void String_Insert_uint8_t(String *string, uint8_t ch, int64_t index)
+static StringMessage String_Insert_Generic(String *string, uint8_t *otherData, int64_t index, int64_t otherCount)
 {
-    if (ch != 0)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        String_Insert_Generic(string, &ch, index, 1);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-}
-
-static void String_Insert_String(String *string, String *otherString, int64_t index)
-{
-    if (otherString && otherString->e)
+    else if(!string->e)
     {
-        String_Insert_Generic(string, otherString->e, index, otherString->count);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
     }
-}
-
-static void String_Append_Generic(String *string, uint8_t *otherData, int64_t otherCount)
-{
-    if (string && string->e)
+    else if (index < 0 || index > string->count)
     {
-        String_Insert_Generic(string, otherData, string->count, otherCount);
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
     }
-}
-
-static void String_Append_CStr(String *string, uint8_t *cStr)
-{
-    if (cStr)
+    else if (otherCount <= 0)
     {
-        String_Append_Generic(string, cStr, strlen((const char *)cStr));
+        msg.code = SCL_STRING_CODE__ERROR_INVALID_STRING_COUNT_PASSED_TO_FUNCTION;
     }
-}
-
-static void String_Append_uint8_t(String *string, uint8_t ch)
-{
-    if (ch != 0)
+    else if (string->count + otherCount > string->countMax)
     {
-        String_Append_Generic(string, &ch, 1);
+        msg = String_From_CountMax(string->count + otherCount);
+        memmove(msg.string.e, string->e, index);
+        memmove(msg.string.e + index, otherData, otherCount);
+        memmove(msg.string.e + index + otherCount, string->e + index, string->count - index);
+        msg.string.count = msg.string.countMax;
+        String_Destroy(string);
+        String_Internal_ExtractStringFromMessage(string, &msg);
     }
-}
-
-static void String_Append_String(String *string, String *otherString)
-{
-    if (otherString && otherString->e)
+    else
     {
-        String_Append_Generic(string, otherString->e, otherString->count);
+        memmove(string->e + index + otherCount, string->e + index, string->count - index);
+        memmove(string->e + index, otherData, otherCount);
+        string->count += otherCount;
     }
+    return msg;
 }
 
-static SSL_STRING_CODE String_Compare(String *stringA, String *stringB)
+static StringMessage String_Insert_CStr(String *string, uint8_t *cStr, int64_t index)
 {
-    SSL_STRING_CODE result = SSL_STRING_CODE__COMPARE_ERROR;
-    if (stringA && stringA->e && stringB && stringB->e)
+    StringMessage msg = { 0 };
+    if (!cStr)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Insert_Generic(string, cStr, index, strlen((const char *)cStr));
+    }
+    return msg;
+}
+
+static StringMessage String_Insert_uint8_t(String *string, uint8_t ch, int64_t index)
+{
+    StringMessage msg = { 0 };
+    if (ch == '\0')
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_CHARACTER_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Insert_Generic(string, &ch, index, 1);
+    }
+    return msg;
+}
+
+static StringMessage String_Insert_String(String *string, String *otherString, int64_t index)
+{
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Insert_Generic(string, otherString->e, index, otherString->count);
+    }
+    return msg;
+}
+
+static StringMessage String_Append_Generic(String *string, uint8_t *otherData, int64_t otherCount)
+{
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if(!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Insert_Generic(string, otherData, string->count, otherCount);
+    }
+    return msg;
+}
+
+static StringMessage String_Append_CStr(String *string, uint8_t *cStr)
+{
+    StringMessage msg = { 0 };
+    if (!cStr)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Append_Generic(string, cStr, strlen((const char *)cStr));
+    }
+    return msg;
+}
+
+static StringMessage String_Append_uint8_t(String *string, uint8_t ch)
+{
+    StringMessage msg = { 0 };
+    if (ch == '\0')
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_CHARACTER_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Append_Generic(string, &ch, 1);
+    }
+    return msg;
+}
+
+static StringMessage String_Append_String(String *string, String *otherString)
+{
+    StringMessage msg = { 0 };
+    if (!otherString)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if(!otherString->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Append_Generic(string, otherString->e, otherString->count);
+    }
+    return msg;
+}
+
+static StringMessage String_Compare(String *stringA, String *stringB)
+{
+    StringMessage msg = { 0 };
+    if (!stringA || !stringB)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if(!stringA->e || !stringB->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         int32_t compVal = strcmp((const char *)stringA->e, (const char *)stringB->e);
         if (compVal == 0)
         {
-            result = SSL_STRING_CODE__COMPARE_EQUAL;
+            msg.code = SCL_STRING_CODE__COMPARE_EQUAL;
         }
         else if(compVal < 0)
         {
-            result = SSL_STRING_CODE__COMPARE_LESS_THAN;
+            msg.code = SCL_STRING_CODE__COMPARE_LESS_THAN;
         }
         else
         {
-            result = SSL_STRING_CODE__COMPARE_GREATER_THAN;
+            msg.code = SCL_STRING_CODE__COMPARE_GREATER_THAN;
         }
     }
-    return result;
+    return msg;
 }
 
-static int64_tWithStringErrorCode int64_t_From_String(String *string)
+static StringMessage int64_t_From_String(String *string)
 {
-    int64_tWithStringErrorCode result = { 0 };
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result.val = atoi((const char *)string->e);
-        String tempIntValString = String_From_CountMax(string->count);
-        sprintf((char *)tempIntValString.e, "%lld", result.val);
-        if (String_Compare(&tempIntValString, string) == SSL_STRING_CODE__COMPARE_EQUAL)
-        {
-            result.errorCode = SSL_STRING_CODE__NONE;
-        }
-        else
-        {
-            result.errorCode = SSL_STRING_CODE__CANT_CONVERT_STRING_TO_int64_t;
-        }
-        String_Destroy(&tempIntValString);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
     }
     else
     {
-        result.errorCode = SSL_STRING_CODE__NULL_STRING_OR_DATA_PASSED_TO_FUNCTION;
+        msg.int64Val = atoi((const char *)string->e);
+        StringMessage tempIntValString = String_From_CountMax(string->count);
+        sprintf((char *)tempIntValString.string.e, "%lld", msg.int64Val);
+        if (String_Compare(&tempIntValString.string, string).code == SCL_STRING_CODE__COMPARE_EQUAL)
+        {
+            msg.code = SCL_STRING_CODE__NO_MESSAGE;
+        }
+        else
+        {
+            msg.code = SCL_STRING_CODE__ERROR_CANT_CONVERT_STRING_TO_int64_t;
+        }
+        String_Destroy(&tempIntValString.string);
     }
-    return result;
+    return msg;
 }
 
-static doubleWithStringErrorCode double_From_String(String *string)
+// TODO(s0lly): Reorder elses
+static StringMessage double_From_String(String *string)
 {
-    doubleWithStringErrorCode result = { 0 };
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        result.val = atof((const char *)string->e);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg.doubleVal = atof((const char *)string->e);
         
         int32_t encounteredDot = 0;
         int32_t countDots = 0;
@@ -590,215 +836,338 @@ static doubleWithStringErrorCode double_From_String(String *string)
             segmentIndex++;
         }
         
-        if (countDots == 1 && countOther == 0 &&
-            countNumsBeforeDot >= 0 && countNumsAfterDot >= 0 &&
-            countNumsBeforeDot + countNumsAfterDot > 0 &&
-            ((countMinus == 0 && !encounteredMinusFirst) || (countMinus == 1 && encounteredMinusFirst)))
+        if (!(countDots == 1 && countOther == 0 &&
+              countNumsBeforeDot >= 0 && countNumsAfterDot >= 0 &&
+              countNumsBeforeDot + countNumsAfterDot > 0 &&
+              ((countMinus == 0 && !encounteredMinusFirst) || (countMinus == 1 && encounteredMinusFirst))))
             // Must be in format [dddd].[dddd] i.e. numbers either or both before and after '.',
             //     but at least one numeric value somewhere
         {
-            result.errorCode = SSL_STRING_CODE__NONE;
-        }
-        else
-        {
-            result.errorCode = SSL_STRING_CODE__CANT_CONVERT_STRING_TO_double;
+            msg.code = SCL_STRING_CODE__ERROR_CANT_CONVERT_STRING_TO_double;
         }
     }
-    else
-    {
-        result.errorCode = SSL_STRING_CODE__NULL_STRING_OR_DATA_PASSED_TO_FUNCTION;
-    }
-    return result;
+    return msg;
 }
 
-static void String_Remove(String *string, int64_t indexStartInclusive, int64_t indexEndInclusive)
+static StringMessage String_Remove(String *string, int64_t indexStartInclusive, int64_t indexEndInclusive)
 {
-    if (string && string->e &&
-        indexStartInclusive >= 0 && indexStartInclusive < string->count &&
-        indexEndInclusive >= 0 && indexEndInclusive < string->count &&
-        indexStartInclusive <= indexEndInclusive)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStartInclusive < 0 || indexStartInclusive >= string->count ||
+             indexEndInclusive < 0 || indexEndInclusive >= string->count ||
+             indexStartInclusive > indexEndInclusive)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
     {
         int64_t originalCount = string->count;
         memmove(string->e + indexStartInclusive, string->e + indexEndInclusive + 1, string->count - (indexEndInclusive + 1));
         string->count = string->count - (indexEndInclusive - indexStartInclusive + 1);
         Mem_ClearBytes(string->e + string->count, originalCount - string->count);
     }
+    return msg;
 }
 
-static void String_Remove_WhitespacePrecending(String *string)
+static StringMessage String_Remove_WhitespacePrecending(String *string)
 {
-    if (string && string->e && string->count > 0)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         int64_t indexFirstNonWhitespace = -1;
         for (int64_t strIndex = 0; strIndex < string->count; strIndex++)
         {
-            if (*String_Get(string, strIndex) != ' ')
+            if (*String_Get(string, strIndex).chPtr != ' ')
             {
                 indexFirstNonWhitespace = strIndex;
                 break;
             }
         }
         
-        if (indexFirstNonWhitespace != 0)
+        if (indexFirstNonWhitespace > 0)
         {
-            if (indexFirstNonWhitespace != -1)
-            {
-                memmove(string->e, string->e + indexFirstNonWhitespace, string->count - indexFirstNonWhitespace);
-                int64_t originalCount = string->count;
-                string->count = string->count - indexFirstNonWhitespace;
-                Mem_ClearBytes(string->e + string->count, originalCount - string->count);
-            }
-            else
-            {
-                int64_t originalCount = string->count;
-                string->count = 0;
-                Mem_ClearBytes(string->e, originalCount);
-            }
+            memmove(string->e, string->e + indexFirstNonWhitespace, string->count - indexFirstNonWhitespace);
+            int64_t originalCount = string->count;
+            string->count = string->count - indexFirstNonWhitespace;
+            Mem_ClearBytes(string->e + string->count, originalCount - string->count);
+        }
+        else if (indexFirstNonWhitespace == -1)
+        {
+            int64_t originalCount = string->count;
+            string->count = 0;
+            Mem_ClearBytes(string->e, originalCount);
         }
     }
+    return msg;
 }
 
-static void String_Remove_WhitespaceFollowing(String *string)
+static StringMessage String_Remove_WhitespaceFollowing(String *string)
 {
-    if (string && string->e && string->count > 0)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         int64_t indexLastNonWhitespace = -1;
         for (int64_t strIndex = string->count - 1; strIndex >= 0; strIndex--)
         {
-            if (*String_Get(string, strIndex) != ' ')
+            if (*String_Get(string, strIndex).chPtr != ' ')
             {
                 indexLastNonWhitespace = strIndex;
                 break;
             }
         }
         
-        if (indexLastNonWhitespace != string->count - 1)
+        if (indexLastNonWhitespace >= 0 && indexLastNonWhitespace < string->count - 1)
         {
-            if (indexLastNonWhitespace != -1)
-            {
-                int64_t originalCount = string->count;
-                string->count = indexLastNonWhitespace + 1;
-                Mem_ClearBytes(string->e + string->count, originalCount - string->count);
-            }
-            else
-            {
-                int64_t originalCount = string->count;
-                string->count = 0;
-                Mem_ClearBytes(string->e, originalCount);
-            }
+            int64_t originalCount = string->count;
+            string->count = indexLastNonWhitespace + 1;
+            Mem_ClearBytes(string->e + string->count, originalCount - string->count);
+        }
+        else if (indexLastNonWhitespace == -1)
+        {
+            int64_t originalCount = string->count;
+            string->count = 0;
+            Mem_ClearBytes(string->e, originalCount);
         }
     }
+    return msg;
 }
 
-static void String_Remove_WhitespaceSurrounding(String *string)
+static StringMessage String_Remove_WhitespaceSurrounding(String *string)
 {
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         String_Remove_WhitespacePrecending(string);
         String_Remove_WhitespaceFollowing(string);
     }
+    return msg;
 }
 
-static void String_ToUpper(String *string)
+static StringMessage String_ToUpper(String *string)
 {
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         for (int64_t strIndex = 0; strIndex < string->count; strIndex++)
         {
-            uint8_t *currentCh = String_Get(string, strIndex);
+            uint8_t *currentCh = String_Get(string, strIndex).chPtr;
             *currentCh = (uint8_t)toupper(*currentCh);
         }
     }
+    return msg;
 }
 
-static void String_ToLower(String *string)
+static StringMessage String_ToLower(String *string)
 {
-    if (string && string->e)
+    StringMessage msg = { 0 };
+    if (!string)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else
     {
         for (int64_t strIndex = 0; strIndex < string->count; strIndex++)
         {
-            uint8_t *currentCh = String_Get(string, strIndex);
+            uint8_t *currentCh = String_Get(string, strIndex).chPtr;
             *currentCh = (uint8_t)tolower(*currentCh);
         }
     }
+    return msg;
 }
 
-static int64_t String_Find_FirstFrom(String *within, String *toFind, int64_t indexStart)
+static StringMessage String_Find_FirstFrom(String *within, String *toFind, int64_t indexStart)
 {
-    int64_t result = -1;
-    if (within && within->e && 
-        toFind && toFind->e &&
-        indexStart >= 0 && indexStart < within->count)
+    StringMessage msg = { 0 };
+    if (!within || !toFind)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!within->e || !toFind->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStart < 0 || indexStart >= within->count)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
     {
         uint8_t *foundPtr = (uint8_t *)strstr((char *)within->e + indexStart, (char *)toFind->e);
-        if (foundPtr)
+        if (!foundPtr)
         {
-            result = (int64_t)(foundPtr - within->e);
+            msg.code = SCL_STRING_CODE__FIND_NO_MATCH;
+        }
+        else
+        {
+            msg.int64Val = (int64_t)(foundPtr - within->e);
         }
     }
-    return result;
+    return msg;
 }
 
-static int64_t String_Find_LastFrom(String *within, String *toFind, int64_t indexStart)
+static StringMessage String_Find_LastFrom(String *within, String *toFind, int64_t indexStart)
 {
-    int64_t result = -1;
-    if (within && within->e && 
-        toFind && toFind->e &&
-        indexStart >= 0 && indexStart < within->count)
+    StringMessage msg = { 0 };
+    if (!within || !toFind)
     {
-        int64_t indexCurrentFound = -1;
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!within->e || !toFind->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStart < 0 || indexStart >= within->count)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
         int64_t indexStartNew = (int64_t)indexStart;
+        StringMessage findMsg = String_Find_FirstFrom(within, toFind, indexStartNew);
         
-        while(indexStartNew < within->count &&
-              (indexCurrentFound = String_Find_FirstFrom(within, toFind, indexStartNew)) != -1)
+        if (findMsg.code ==  SCL_STRING_CODE__FIND_NO_MATCH)
         {
-            result = indexCurrentFound;
-            indexStartNew = indexCurrentFound + 1;
+            msg.code = SCL_STRING_CODE__FIND_NO_MATCH;
+        }
+        else
+        {
+            while(indexStartNew < within->count &&
+                  (findMsg.code != SCL_STRING_CODE__FIND_NO_MATCH))
+            {
+                msg.int64Val = findMsg.int64Val;
+                indexStartNew = findMsg.int64Val + 1;
+                findMsg = String_Find_FirstFrom(within, toFind, indexStartNew);
+            }
         }
     }
-    return result;
+    return msg;
 }
 
-static void String_Replace(String *string, String *newContents, int64_t indexStartInclusive, int64_t indexEndInclusive)
+static StringMessage String_Replace(String *string, String *newContents,
+                                    int64_t indexStartInclusive, int64_t indexEndInclusive)
 {
-    if (string && string->e && newContents && newContents->e &&
-        indexStartInclusive >= 0 && indexStartInclusive < string->count &&
-        indexEndInclusive >= 0 && indexEndInclusive < string->count &&
-        indexStartInclusive <= indexEndInclusive)
+    StringMessage msg = { 0 };
+    if (!string)
     {
-        String_Remove(string, indexStartInclusive, indexEndInclusive);
-        String_Insert_String(string, newContents, indexStartInclusive);
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
     }
-}
-
-static void String_FindReplaceFrom(String *string, String *oldContents, String *newContents, int64_t indexStart)
-{
-    if (string && string->e && 
-        oldContents && oldContents->e &&
-        newContents && newContents->e &&
-        indexStart >= 0 && indexStart < string->count)
+    else if (!string->e)
     {
-        int64_t firstFind = String_Find_FirstFrom(string, oldContents, indexStart);
-        if (firstFind != -1)
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStartInclusive < 0 || indexStartInclusive >= string->count ||
+             indexEndInclusive < 0 || indexEndInclusive >= string->count ||
+             indexStartInclusive > indexEndInclusive)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Remove(string, indexStartInclusive, indexEndInclusive);
+        if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
         {
-            String_Replace(string, newContents, firstFind, firstFind + oldContents->count - 1);
+            msg = String_Insert_String(string, newContents, indexStartInclusive);
         }
     }
+    return msg;
 }
 
-static void String_FindReplaceFrom_All(String *string, String *oldContents, String *newContents, int64_t indexStart)
+static StringMessage String_FindReplaceFrom(String *string, String *oldContents, String *newContents, int64_t indexStart)
 {
-    if (string && string->e && 
-        oldContents && oldContents->e &&
-        newContents && newContents->e &&
-        indexStart >= 0 && indexStart < string->count)
+    StringMessage msg = { 0 };
+    if (!string || !oldContents || !newContents)
     {
-        int64_t firstFind = -1;
-        while((firstFind = String_Find_FirstFrom(string, oldContents, indexStart)) != -1)
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e || !oldContents->e || !newContents->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStart < 0 || indexStart >= string->count)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Find_FirstFrom(string, oldContents, indexStart);
+        if (msg.code == SCL_STRING_CODE__NO_MESSAGE)
         {
-            String_Replace(string, newContents, firstFind, firstFind + oldContents->count - 1);
+            int64_t firstFind = msg.int64Val;
+            msg = String_Replace(string, newContents, firstFind, firstFind + oldContents->count - 1);
         }
     }
+    return msg;
+}
+
+static StringMessage String_FindReplaceFrom_All(String *string, String *oldContents, String *newContents,
+                                                int64_t indexStart)
+{
+    StringMessage msg = { 0 };
+    if (!string || !oldContents || !newContents)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_STRING_PASSED_TO_FUNCTION;
+    }
+    else if (!string->e || !oldContents->e || !newContents->e)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_NULL_DATA_PASSED_TO_FUNCTION;
+    }
+    else if (indexStart < 0 || indexStart >= string->count)
+    {
+        msg.code = SCL_STRING_CODE__ERROR_OUT_OF_RANGE_INDEX_PASSED_TO_FUNCTION;
+    }
+    else
+    {
+        msg = String_Find_FirstFrom(string, oldContents, indexStart);
+        while(msg.code == SCL_STRING_CODE__NO_MESSAGE)
+        {
+            int64_t firstFind = msg.int64Val;
+            msg = String_Replace(string, newContents, firstFind, firstFind + oldContents->count - 1);
+        }
+    }
+    return msg;
 }
 
 
@@ -856,7 +1225,7 @@ static void StringList_Resize(StringList *stringList, int64_t countMaxNew)
             result = StringList_From_CountMax(countMaxNew);
             for (int64_t stringIndex = 0; stringIndex < min(countMaxNew, stringList->count); stringIndex++)
             {
-                result.e[stringIndex] = String_From_String(StringList_Get(stringList, stringIndex));
+                result.e[stringIndex] = String_From_String(StringList_Get(stringList, stringIndex)).string;
             }
             result.count = stringList->count;
             StringList_Destroy(stringList);
@@ -889,7 +1258,7 @@ static void StringList_PushCopy(StringList *stringList, String *string)
             *stringList = StringList_From_CountMax(1);
         }
         
-        stringList->e[stringList->count] = String_From_String(string);
+        stringList->e[stringList->count] = String_From_String(string).string;
         stringList->count++;
     }
 }
@@ -923,7 +1292,7 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                 }
             }
             
-            // TODO(JS): Need to think through how to handle all ignorables
+            // TODO(s0lly): Need to think through how to handle all ignorables
             while(cursorIndex <= string->count && endCellIndex == -1 && !isEmptyCell)
             {
                 uint8_t *currentChar = &string->e[cursorIndex]; 
@@ -958,7 +1327,7 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
             
             if (cursorIndex > (int64_t)strlen((const char *)string->e) && endCellIndex == -1)
             {
-                String tempString = String_From_CStr("");
+                String tempString = String_From_CStr("").string;
                 StringList_PushCopy(&result, &tempString);
                 String_Destroy(&tempString);
                 break;
@@ -975,13 +1344,13 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                 int64_t destIndex = 0;
                 int64_t srcIndex = startCellIndex;
                 
-                // TODO(JS): hits out of bounds on end of string - fix
+                // TODO(s0lly): hits out of bounds on end of string - fix
                 uint8_t originalDelimited = string->e[endCellIndex + 1];
                 string->e[endCellIndex + 1] = 0;
                 
                 ignoreCharCounter = 0;
                 
-                // TODO(JS): allow for larger sizes?
+                // TODO(s0lly): allow for larger sizes?
                 uint8_t *segment = calloc(4096, sizeof(uint8_t)); 
                 
                 while(srcIndex <= endCellIndex)
@@ -1009,7 +1378,7 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
                     
                 }
                 
-                String tempString = String_From_CStr((const char *)segment);
+                String tempString = String_From_CStr((const char *)segment).string;
                 StringList_PushCopy(&result, &tempString);
                 String_Destroy(&tempString);
                 
@@ -1018,7 +1387,7 @@ static StringList StringList_From_String_SplitByDelimiters(String *string, Strin
             }
             else
             {
-                String tempString = String_From_CStr("");
+                String tempString = String_From_CStr("").string;
                 StringList_PushCopy(&result, &tempString);
                 String_Destroy(&tempString);
                 
@@ -1037,7 +1406,7 @@ static StringList StringList_From_File(File *file)
     
     if (file && file->handle)
     {
-        String fileStr = String_From_FileNextLine(file);
+        String fileStr = String_From_FileNextLine(file).string;
         
         while(fileStr.e)
         {
@@ -1075,7 +1444,7 @@ static StringList StringList_From_Filename_CStr(const char *cStr)
     
     if (cStr)
     {
-        String filename = String_From_CStr(cStr);
+        String filename = String_From_CStr(cStr).string;
         result = StringList_From_Filename_String(&filename);
         String_Destroy(&filename);
     }
